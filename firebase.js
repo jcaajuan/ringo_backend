@@ -4,10 +4,7 @@ let serviceAccount;
 
 if (process.env.FIREBASE_CREDENTIALS) {
   try {
-    // Si la variable viene como string JSON desde Render
     serviceAccount = JSON.parse(process.env.FIREBASE_CREDENTIALS);
-    
-    // Corregir posibles saltos de línea en la clave privada
     if (serviceAccount.private_key) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
@@ -16,14 +13,13 @@ if (process.env.FIREBASE_CREDENTIALS) {
   }
 } else {
   try {
-    // Carga local
     serviceAccount = require('./firebase-key.json');
   } catch (err) {
     console.error('❌ No se encontró firebase-key.json localmente');
   }
 }
 
-if (!admin.apps.length) {
+if (!admin.apps || admin.apps.length === 0) {
   admin.initializeApp({
     credential: admin.credential.cert(serviceAccount)
   });
