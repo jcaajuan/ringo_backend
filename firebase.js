@@ -9,7 +9,7 @@ if (process.env.FIREBASE_CREDENTIALS) {
       serviceAccount.private_key = serviceAccount.private_key.replace(/\\n/g, '\n');
     }
   } catch (err) {
-    console.error('❌ Error al parsear FIREBASE_CREDENTIALS:', err.message);
+    console.error('❌ Error al parsear FIREBASE_CREDENTIALS en Render:', err.message);
   }
 } else {
   try {
@@ -19,9 +19,9 @@ if (process.env.FIREBASE_CREDENTIALS) {
   }
 }
 
-if (!admin.apps || admin.apps.length === 0) {
+if (!admin.apps.length) {
   admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount)
+    credential: admin.credential ? admin.credential.cert(serviceAccount) : admin.cert(serviceAccount)
   });
 }
 
