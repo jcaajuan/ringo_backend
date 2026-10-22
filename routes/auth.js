@@ -59,6 +59,20 @@ function detalleTwilio(error) {
   }));
 }
 
+function logFirebase(contexto, error) {
+  console.error(`[Firebase] ${contexto}`);
+  console.error('[Firebase] code:', error && error.code);
+  console.error('[Firebase] message:', error && error.message);
+  if (error && error.errorInfo) {
+    console.error('[Firebase] errorInfo:', JSON.stringify(error.errorInfo));
+  }
+  if (error && error.stack) {
+    console.error(error.stack);
+  } else {
+    console.error(error);
+  }
+}
+
 function mensajeTwilio(error) {
   const codigo = Number(error && error.code);
   switch (codigo) {
@@ -134,6 +148,46 @@ async function buscarUsuario(telefono) {
   return null;
 }
 
+const MENSAJE_TELEFONO_REGISTRADO = 'El número de teléfono ya está registrado';
+
+async function telefonoYaRegistrado(telefono) {
+  if (!db) {
+    const error = new Error('Firebase no está configurado en el servidor');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  try {
+    const record = await getAuth().getUserByPhoneNumber(telefono);
+    if (record) {
+      console.error(`[Firebase] Teléfono ya existe en Authentication uid=${record.uid} phone=${telefono}`);
+      return true;
+    }
+  } catch (error) {
+    if (error.code !== 'auth/user-not-found') {
+      logFirebase(`getUserByPhoneNumber ${telefono}`, error);
+      const fallo = new Error('No se pudo comprobar el número de teléfono.');
+      fallo.statusCode = 500;
+      throw fallo;
+    }
+  }
+
+  try {
+    const perfil = await buscarUsuario(telefono);
+    if (perfil) {
+      console.error(`[Firebase] Teléfono ya existe en Firestore ${perfil.coleccion}/${perfil.id} phone=${telefono}`);
+      return true;
+    }
+  } catch (error) {
+    logFirebase(`consulta Firestore del teléfono ${telefono}`, error);
+    const fallo = new Error('No se pudo comprobar el número de teléfono.');
+    fallo.statusCode = 500;
+    throw fallo;
+  }
+
+  return false;
+}
+
 // POST /api/auth/sendVerificationCode
 router.post('/sendVerificationCode', async (req, res) => {
   const client = twilioClient();
@@ -151,6 +205,24 @@ router.post('/sendVerificationCode', async (req, res) => {
       message: 'Número inválido. Usa formato internacional, por ejemplo +58412XXXXXXX.'
     });
   }
+
+  try {
+    if (await telefonoYaRegistrado(telefono)) {
+      return res.status(400).json({
+        success: false,
+        message: MENSAJE_TELEFONO_REGISTRADO
+      });
+    }
+  } catch (error) {
+    logFirebase(`comprobación de duplicado antes de enviar OTP ${telefono}`, error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.statusCode === 503
+        ? 'Firebase no está configurado en el servidor'
+        : 'No se pudo comprobar el número de teléfono.'
+    });
+  }
+
   if (!permitirEnvio(telefono)) {
     return res.status(429).json({
       success: false,
@@ -213,7 +285,7 @@ function mensajeAuth(error) {
     case 'auth/email-already-exists':
       return 'Ya existe una cuenta con ese correo. Prueba iniciar sesión.';
     case 'auth/phone-number-already-exists':
-      return 'Ese teléfono ya está registrado. Prueba iniciar sesión.';
+      return MENSAJE_TELEFONO_REGISTRADO;
     case 'auth/invalid-password':
       return 'La contraseña es muy débil. Usa al menos 6 caracteres.';
     case 'auth/invalid-email':
@@ -231,6 +303,7 @@ async function sesionDe(uid, extra) {
 async function crearCuenta(telefono, registro) {
   const auth = getAuth();
   let record;
+  console.log(`[Firebase] createUser tras OTP aprobado phone=${telefono} email=${registro.email} nombre=${registro.nombre}`);
   try {
     record = await auth.createUser({
       email: registro.email,
@@ -238,19 +311,12 @@ async function crearCuenta(telefono, registro) {
       displayName: registro.nombre,
       phoneNumber: telefono
     });
+    console.log(`[Firebase] Authentication creó uid=${record.uid} phone=${telefono}`);
   } catch (error) {
-    if (error.code === 'auth/phone-number-already-exists') {
-      const existente = await auth.getUserByPhoneNumber(telefono);
-      const sesion = await sesionDe(existente.uid, {
-        coleccion: 'usuarios',
-        nombre: existente.displayName || '',
-        email: existente.email || '',
-        telefono
-      });
-      return { isNewUser: false, ...sesion };
-    }
+    logFirebase(`createUser phone=${telefono} email=${registro.email}`, error);
     const fallo = new Error(mensajeAuth(error));
     fallo.statusCode = error.code === 'auth/email-already-exists' ? 409 : 400;
+    fallo.code = error.code;
     throw fallo;
   }
 
@@ -265,8 +331,18 @@ async function crearCuenta(telefono, registro) {
       estado: 'Anzoátegui',
       createdAt: FieldValue.serverTimestamp()
     });
+    console.log(`[Firebase] Perfil guardado en usuarios/${record.uid}`);
   } catch (error) {
-    console.error('Perfil no guardado en Firestore:', error.message);
+    logFirebase(`set usuarios/${record.uid} phone=${telefono}`, error);
+    try {
+      await auth.deleteUser(record.uid);
+      console.error(`[Firebase] Se revirtió Authentication uid=${record.uid} porque Firestore falló`);
+    } catch (borrado) {
+      logFirebase(`deleteUser de reversión uid=${record.uid}`, borrado);
+    }
+    const fallo = new Error('No se pudo guardar el perfil. Intenta de nuevo.');
+    fallo.statusCode = 500;
+    throw fallo;
   }
 
   const sesion = await sesionDe(record.uid, {
@@ -317,25 +393,20 @@ router.post('/verifyCode', async (req, res) => {
       });
     }
 
-    const user = await buscarUsuario(telefono);
-    if (user) {
-      let token = null;
-      try {
-        token = await getAuth().createCustomToken(user.id);
-      } catch (error) {
-        console.error('No se pudo crear la sesión:', error.message);
-      }
-      return res.json({
-        success: true,
-        isNewUser: false,
-        user,
-        token
+    if (await telefonoYaRegistrado(telefono)) {
+      return res.status(400).json({
+        success: false,
+        message: MENSAJE_TELEFONO_REGISTRADO
       });
     }
 
     const registro = datosRegistro(req.body);
     if (!registro) {
-      return res.json({ success: true, isNewUser: true });
+      console.error(`[Firebase] OTP aprobado para ${telefono}, pero la petición no trae datos de registro`);
+      return res.status(400).json({
+        success: false,
+        message: 'Faltan los datos de registro para crear la cuenta.'
+      });
     }
 
     const cuenta = await crearCuenta(telefono, registro);
@@ -347,15 +418,26 @@ router.post('/verifyCode', async (req, res) => {
       token
     });
   } catch (error) {
-    console.error('Fallo al comprobar el código OTP:');
-    detalleTwilio(error);
+    console.error('[verifyCode] Fallo al verificar o crear la cuenta');
+    console.error('[verifyCode] code:', error && error.code);
+    console.error('[verifyCode] status:', error && (error.status || error.statusCode));
+    console.error('[verifyCode] message:', error && error.message);
+    if (error && error.stack) console.error(error.stack);
+    if (error && (error.moreInfo || error.status)) detalleTwilio(error);
+    else logFirebase('verifyCode', error);
     if (error.statusCode) {
       return res.status(error.statusCode).json({
         success: false,
         message: error.message
       });
     }
-    if (error.status || error.code) {
+    if (error.code && String(error.code).startsWith('auth/')) {
+      return res.status(500).json({
+        success: false,
+        message: mensajeAuth(error)
+      });
+    }
+    if (error.status || (error.code && error.moreInfo)) {
       return res.status(error.status && error.status < 500 ? error.status : 502).json({
         success: false,
         message: mensajeTwilio(error)
