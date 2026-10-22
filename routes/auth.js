@@ -3,6 +3,7 @@ const path = require('path');
 const express = require('express');
 const twilio = require('twilio');
 const { getAuth } = require('firebase-admin/auth');
+const { FieldValue } = require('firebase-admin/firestore');
 const db = require('../firebase');
 
 const router = express.Router();
@@ -184,6 +185,100 @@ router.post('/sendVerificationCode', async (req, res) => {
   }
 });
 
+function datosRegistro(body) {
+  const nombre = String((body && body.nombre) || '').trim();
+  const email = String((body && body.email) || '').trim().toLowerCase();
+  const password = String((body && body.password) || '');
+  if (!nombre && !email && !password) return null;
+  if (!nombre || nombre.length > 50) {
+    const error = new Error('Ingresa un nombre válido.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 80) {
+    const error = new Error('El correo electrónico no es válido.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (password.length < 6 || password.length > 32) {
+    const error = new Error('La contraseña debe tener entre 6 y 32 caracteres.');
+    error.statusCode = 400;
+    throw error;
+  }
+  return { nombre, email, password };
+}
+
+function mensajeAuth(error) {
+  switch (error && error.code) {
+    case 'auth/email-already-exists':
+      return 'Ya existe una cuenta con ese correo. Prueba iniciar sesión.';
+    case 'auth/phone-number-already-exists':
+      return 'Ese teléfono ya está registrado. Prueba iniciar sesión.';
+    case 'auth/invalid-password':
+      return 'La contraseña es muy débil. Usa al menos 6 caracteres.';
+    case 'auth/invalid-email':
+      return 'El correo electrónico no es válido.';
+    default:
+      return 'No se pudo crear la cuenta.';
+  }
+}
+
+async function sesionDe(uid, extra) {
+  const token = await getAuth().createCustomToken(uid);
+  return { id: uid, ...extra, token };
+}
+
+async function crearCuenta(telefono, registro) {
+  const auth = getAuth();
+  let record;
+  try {
+    record = await auth.createUser({
+      email: registro.email,
+      password: registro.password,
+      displayName: registro.nombre,
+      phoneNumber: telefono
+    });
+  } catch (error) {
+    if (error.code === 'auth/phone-number-already-exists') {
+      const existente = await auth.getUserByPhoneNumber(telefono);
+      const sesion = await sesionDe(existente.uid, {
+        coleccion: 'usuarios',
+        nombre: existente.displayName || '',
+        email: existente.email || '',
+        telefono
+      });
+      return { isNewUser: false, ...sesion };
+    }
+    const fallo = new Error(mensajeAuth(error));
+    fallo.statusCode = error.code === 'auth/email-already-exists' ? 409 : 400;
+    throw fallo;
+  }
+
+  try {
+    await db.collection('usuarios').doc(record.uid).set({
+      nombre: registro.nombre,
+      email: registro.email,
+      telefono,
+      telefonoVerificado: true,
+      rol: 'cliente',
+      ciudad: 'El Tigre',
+      estado: 'Anzoátegui',
+      createdAt: FieldValue.serverTimestamp()
+    });
+  } catch (error) {
+    console.error('Perfil no guardado en Firestore:', error.message);
+  }
+
+  const sesion = await sesionDe(record.uid, {
+    coleccion: 'usuarios',
+    nombre: registro.nombre,
+    email: registro.email,
+    telefono,
+    rol: 'cliente'
+  });
+  return { isNewUser: true, ...sesion };
+}
+
 // POST /api/auth/verifyCode
 router.post('/verifyCode', async (req, res) => {
   const client = twilioClient();
@@ -223,26 +318,43 @@ router.post('/verifyCode', async (req, res) => {
     }
 
     const user = await buscarUsuario(telefono);
-    if (!user) {
+    if (user) {
+      let token = null;
+      try {
+        token = await getAuth().createCustomToken(user.id);
+      } catch (error) {
+        console.error('No se pudo crear la sesión:', error.message);
+      }
+      return res.json({
+        success: true,
+        isNewUser: false,
+        user,
+        token
+      });
+    }
+
+    const registro = datosRegistro(req.body);
+    if (!registro) {
       return res.json({ success: true, isNewUser: true });
     }
 
-    let token = null;
-    try {
-      token = await getAuth().createCustomToken(user.id);
-    } catch (error) {
-      console.error('No se pudo crear la sesión:', error.message);
-    }
-
+    const cuenta = await crearCuenta(telefono, registro);
+    const { token, isNewUser, ...perfil } = cuenta;
     return res.json({
       success: true,
-      isNewUser: false,
-      user,
+      isNewUser,
+      user: perfil,
       token
     });
   } catch (error) {
     console.error('Fallo al comprobar el código OTP:');
     detalleTwilio(error);
+    if (error.statusCode) {
+      return res.status(error.statusCode).json({
+        success: false,
+        message: error.message
+      });
+    }
     if (error.status || error.code) {
       return res.status(error.status && error.status < 500 ? error.status : 502).json({
         success: false,
