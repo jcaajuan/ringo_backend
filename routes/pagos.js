@@ -4,18 +4,32 @@ const db = require('../firebase');
 
 // POST /api/pagos/webhook-pago
 router.post('/webhook-pago', async (req, res) => {
-  const { referencia, monto, telefono } = req.body || {};
+  if (!db) {
+    return res.status(503).json({
+      success: false,
+      message: 'Firebase no está configurado en el servidor'
+    });
+  }
 
-  const refLimpia = referencia || 'N/A';
-  const montoLimpio = monto || '0.00';
-  const telLimpio = telefono || 'N/A';
+  const { referencia, monto, telefono } = req.body || {};
+  const refLimpia = referencia != null ? String(referencia).trim() : '';
+
+  if (!refLimpia) {
+    return res.status(400).json({
+      success: false,
+      message: 'La referencia de pago es obligatoria'
+    });
+  }
+
+  const montoLimpio = monto != null && String(monto).trim() !== '' ? String(monto).trim() : '0.00';
+  const telLimpio = telefono != null && String(telefono).trim() !== '' ? String(telefono).trim() : 'N/A';
 
   try {
-    // Guardar en la colección "pagos"
     await db.collection('pagos').add({
       referencia: refLimpia,
       monto: montoLimpio,
       telefono: telLimpio,
+      usado: false,
       fecha: new Date().toISOString()
     });
 

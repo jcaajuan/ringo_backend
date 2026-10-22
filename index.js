@@ -21,6 +21,12 @@ app.get('/', (req, res) => {
 const pagosRoutes = require('./routes/pagos');
 app.use('/api/pagos', pagosRoutes);
 
+const viajesRoutes = require('./routes/viajes');
+app.use('/api/viajes', viajesRoutes);
+
+const authRoutes = require('./routes/auth');
+app.use('/api/auth', authRoutes);
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {

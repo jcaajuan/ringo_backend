@@ -4,9 +4,9 @@ const { getFirestore } = require('firebase-admin/firestore');
 function obtenerCredenciales() {
   if (process.env.FIREBASE_CREDENTIALS) {
     try {
-      let rawCreds = process.env.FIREBASE_CREDENTIALS.trim();
+      const rawCreds = process.env.FIREBASE_CREDENTIALS.trim();
       const parsed = JSON.parse(rawCreds);
-      
+
       if (parsed.private_key) {
         parsed.private_key = parsed.private_key.replace(/\\n/g, '\n');
       }
@@ -26,22 +26,22 @@ function obtenerCredenciales() {
 }
 
 const serviceAccount = obtenerCredenciales();
+let db = null;
 
 if (!serviceAccount) {
   console.error('❌ CRÍTICO: No se pudieron cargar las credenciales de Firebase');
-} else {
-  if (getApps().length === 0) {
-    try {
-      initializeApp({
-        credential: cert(serviceAccount)
-      });
-      console.log('✅ Firebase conectado exitosamente');
-    } catch (err) {
-      console.error('❌ Error al inicializar Firebase:', err.message);
-    }
+} else if (getApps().length === 0) {
+  try {
+    initializeApp({
+      credential: cert(serviceAccount)
+    });
+    db = getFirestore();
+    console.log('✅ Firebase conectado exitosamente');
+  } catch (err) {
+    console.error('❌ Error al inicializar Firebase:', err.message);
   }
+} else {
+  db = getFirestore();
 }
-
-const db = getFirestore();
 
 module.exports = db;
