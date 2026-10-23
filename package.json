@@ -15,7 +15,6 @@
     "cors": "^2.8.6",
     "dotenv": "^18.0.4",
     "express": "^5.2.1",
-    "firebase-admin": "^14.5.0",
-    "twilio": "^6.2.0"
+    "firebase-admin": "^14.5.0"
   }
 }
