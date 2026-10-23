@@ -24,6 +24,9 @@ app.use('/api/pagos', pagosRoutes);
 const viajesRoutes = require('./routes/viajes');
 app.use('/api/viajes', viajesRoutes);
 
+const authRoutes = require('./routes/auth');
+app.use('/api/auth', authRoutes);
+
 const couponsRoutes = require('./routes/coupons');
 app.use('/api/coupons', couponsRoutes);
 
