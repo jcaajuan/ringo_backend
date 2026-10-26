@@ -20,19 +20,14 @@ function perfilDesdeToken(decoded) {
   };
 }
 
-// Crea el perfil una sola vez. `users` es la colección pedida para Google.
-// `usuarios` es la que ya lee la app al armar un viaje.
+// Misma colección que el registro por formulario y por teléfono.
 async function guardarPerfil(uid, datos) {
-  const refs = [
-    db.collection('users').doc(uid),
-    db.collection('usuarios').doc(uid)
-  ];
+  const ref = db.collection('usuarios').doc(uid);
   let esNuevo = false;
 
   await db.runTransaction(async (tx) => {
-    const snaps = [];
-    for (const ref of refs) snaps.push(await tx.get(ref));
-    esNuevo = snaps.every((snap) => !snap.exists);
+    const snap = await tx.get(ref);
+    esNuevo = !snap.exists;
     const carga = {
       ...datos,
       updatedAt: FieldValue.serverTimestamp()
@@ -43,7 +38,7 @@ async function guardarPerfil(uid, datos) {
       carga.estado = 'Anzoátegui';
       carga.createdAt = FieldValue.serverTimestamp();
     }
-    for (const ref of refs) tx.set(ref, carga, { merge: true });
+    tx.set(ref, carga, { merge: true });
   });
 
   return esNuevo;

@@ -30,6 +30,10 @@ app.use('/api/auth', authRoutes);
 const couponsRoutes = require('./routes/coupons');
 app.use('/api/coupons', couponsRoutes);
 
+const db = require('./firebase');
+const { escucharSolicitudes } = require('./notificaciones');
+if (db) escucharSolicitudes(db);
+
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
