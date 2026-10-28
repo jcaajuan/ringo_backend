@@ -31,8 +31,8 @@ const couponsRoutes = require('./routes/coupons');
 app.use('/api/coupons', couponsRoutes);
 
 const db = require('./firebase');
-const { escucharSolicitudes } = require('./notificaciones');
-if (db) escucharSolicitudes(db);
+const { escucharNotificaciones } = require('./notificaciones');
+if (db) escucharNotificaciones(db);
 
 // Iniciar servidor
 const PORT = process.env.PORT || 3000;
