@@ -297,33 +297,60 @@ async function avisarMensaje(db, doc) {
 
   const autor = texto(data.autorId) || texto(data.senderId);
   const cuerpo = texto(data.texto);
-  if (!autor || !cuerpo) return;
+
+  if (!autor) {
+    console.warn(`Mensaje ${doc.id}: sin autorId/senderId — push omitido`);
+    return;
+  }
+  if (!cuerpo) {
+    console.warn(`Mensaje ${doc.id}: campo 'texto' vacío — push omitido`);
+    return;
+  }
 
   const viajeSnap = await viajeRef.get();
   const viaje = viajeSnap.data() || {};
   const userId = texto(viaje.userId);
   const conductorId = texto(viaje.conductorId);
-  const payload = {
+
+  if (!userId && !conductorId) {
+    console.warn(`Mensaje ${doc.id}: viaje ${viajeRef.id} sin userId ni conductorId — push omitido`);
+    return;
+  }
+
+  // collapseKey por mensajeId: cada mensaje tiene su propia clave, así Android
+  // no los batea ni los colapsa con mensajes anteriores en modo Doze.
+  const opciones = {
+    ttlMs: TTL_AVISO_MS,
+    collapseKey: `msg_${doc.id}`.slice(0, 64),
+  };
+
+  const payloadBase = {
     tipo: 'mensaje_chat',
     viajeId: viajeRef.id,
     mensajeId: doc.id,
     cuerpo,
   };
-  const opciones = { ttlMs: TTL_AVISO_MS };
 
   if (autor === userId && conductorId) {
     await enviarAConductor(db, conductorId, {
-      ...payload,
+      ...payloadBase,
       titulo: texto(viaje.pasajeroNombre) || 'Pasajero',
     }, opciones);
     return;
   }
+
   if (autor === conductorId && userId) {
     await enviarAUsuario(db, userId, {
-      ...payload,
+      ...payloadBase,
       titulo: texto(viaje.conductorNombre) || 'Tu conductor',
     }, opciones);
+    return;
   }
+
+  console.warn(
+    `Mensaje ${doc.id}: autor '${autor}' no coincide con userId='${userId}' ` +
+    `ni conductorId='${conductorId}' en viaje ${viajeRef.id} — push omitido`,
+  );
 }
 
 function escucharNotificaciones(db) {
