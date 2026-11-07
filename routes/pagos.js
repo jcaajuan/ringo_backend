@@ -11,7 +11,11 @@ router.post('/webhook-pago', async (req, res) => {
     });
   }
 
-  const { referencia, monto, telefono } = req.body || {};
+  const body = req.body || {};
+  const query = req.query || {};
+  const referencia = body.referencia || query.referencia;
+  const monto = body.monto || query.monto || '0.00';
+  const telefono = body.telefono || query.telefono || 'N/A';
   const refLimpia = referencia != null ? String(referencia).trim() : '';
 
   if (!refLimpia) {
