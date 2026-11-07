@@ -4,9 +4,10 @@ const cors = require('cors');
 
 const app = express();
 
-// Middlewares
+// Middlewares de parseo: deben ir antes de cualquier ruta
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // Ruta principal
 app.get('/', (req, res) => {
