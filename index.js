@@ -31,6 +31,9 @@ app.use('/api/auth', authRoutes);
 const couponsRoutes = require('./routes/coupons');
 app.use('/api/coupons', couponsRoutes);
 
+const adminRoutes = require('./routes/admin');
+app.use('/api/admin', adminRoutes);
+
 const db = require('./firebase');
 const { escucharNotificaciones } = require('./notificaciones');
 if (db) escucharNotificaciones(db);
